@@ -23,27 +23,42 @@ The authoritative list of allowed keys, field types, features, `on_delete` value
 
 ### Model constructs (summary — details in the schema)
 
-- **types (primitives/field types):** `string`, `int`, `decimal`, `bool`, `datetime`, `date`, `uuid`, `json`, `array(...)`, enum references.
-- **field modifiers:** `required`, `unique`, `hidden`, `max:N`, `min:N`, `default:...`, `index`, type wrappers.
-- **`entities:`** — name → entity with `fields`, `relations`, `features`, `permissions`, `seed`, `indexes`, `old_name`.
-- **`relations:`** — `on_delete` (`cascade`, `restrict`, `set_null`, `no_action`), `many`, `set_null`.
-- **`features:`** per entity — `audit`, `audit_log`, `soft_delete`, `optimistic_lock` (auto-add `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`).
-- **`auth:`** — `type` (`jwt`, `none`), `entity`, `roles`, `endpoints` (`login`, `register`, `me`).
-- **`permissions:`** per entity — role-based `read/write/update/delete`, tokens `*` (everyone) and `@Owner` (record owner).
-- **`seed:`** — starter data; also `indexes`, `cache`, event-sourcing.
+- **top-level keys:** `project`, `database`, `api_style`, `auth`, `entities`, `enums` (details in the schema).
+- **Field definition strings** — every field in `fields:` is a string: `<type> [modifiers]`, e.g. `string [required, max:255]`. Types: `string`, `text`, `int`, `bigint`, `float`, `decimal`, `boolean`, `date`, `datetime`, `uuid`, `json`, `jsonb`, `array(Type)`, `enum(Name)`.
+- **Relations are fields, not a separate key — there is no `relations:` block.** Declare a relation as a field whose type is `relation(Target)`:
+  - `orderId: relation(Order) [required, on_delete:cascade]` — many-to-one (FK).
+  - `parentId: relation(Category) [optional, on_delete:set_null]` — `set_null` requires `optional`.
+  - `tags: relation(Tag) [many]` — many-to-many.
+  - `profile: relation(Profile) [optional, unique]` — one-to-one.
+  - `on_delete` values: `cascade`, `restrict`, `set_null`, `no_action`.
+- **field modifiers:** `required`, `optional`, `unique`, `hidden`, `primary`, `email`, `url`, `ipv4`, `many`, `min:N`, `max:N`, `gte:N`, `gt:N`, `lte:N`, `lt:N`, `regex:"..."`, `default:...`.
+- **`features:`** per entity — `audit`, `audit_log`, `soft_delete`, `optimistic_lock`, `event_sourced`, `cacheable` (auto-add `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`).
+- **`auth:`** — `type` (`jwt`, `none`), `entity`, `roles`, `endpoints` (`login`, `register`, `me`). With `type: jwt` the csharp bridge generates the `/login`, `/register`, `/me` endpoints and JWT token issuance; the auth entity needs `email` and `password` fields.
+- **`permissions:`** per entity — `read`/`create`/`update`/`delete` role arrays, tokens `*` (everyone) and `@Owner` (record owner).
+- **`seed:`** — starter data; also `indexes`, `old_name`, `cache`, event-sourcing.
 
 Roles (other than `*`, `@Owner`) must be declared in `auth.roles`. The auth entity must have `email` and `password` fields.
+
+### YAML gotchas
+
+- **Quote `@Owner` in permissions.** YAML reserves `@`, so an unquoted `@Owner` fails to parse. Write `["@Owner"]` or `"@Owner"`.
+- **No space after `:` inside a field definition string.** `default: 5` is read by YAML as a nested mapping. Write `default:5` (or `default:"pending"` for quoted string values).
 
 ### Minimal model example
 
 ```yaml
+project:
+  name: MyApp
 entities:
+  OrderItem:
+    fields:
+      id: uuid [primary]
   Order:
     fields:
+      id: uuid [primary]
       number: string [required, unique]
-      total: decimal [required, min:0]
-    relations:
-      items: { from: OrderItem, on_delete: cascade }
+      total: decimal [required, gte:0]
+      items: relation(OrderItem) [many]
 ```
 
 ## What is generated for you (do not touch)
