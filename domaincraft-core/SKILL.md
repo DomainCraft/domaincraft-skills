@@ -39,6 +39,14 @@ The authoritative list of allowed keys, field types, features, `on_delete` value
 
 Roles (other than `*`, `@Owner`) must be declared in `auth.roles`. The auth entity must have `email` and `password` fields.
 
+### Rules every model must satisfy (fix these or validation fails)
+
+- **Exactly one primary key.** Every entity needs one field marked `[primary]` (e.g. `id: uuid [primary]`). Omitting it → `entity must have at least one primary key (add a field marked [primary]...)`.
+- **Enums go in two places.** Declare the enum in the top-level `enums:` block AND reference it with the `enum(...)` wrapper: `status: enum(OrderStatus)`. A bare `OrderStatus` as a type is NOT valid — the `unknown type` error now explicitly says to use `enum(EnumName)`.
+- **`min`/`max` are string length, not numeric bounds.** For numbers use `gte`/`gt`/`lte`/`lt`: `price: decimal [required, gte:0]`. Writing `min:0` on a `decimal` only produces a warning, but it's a bug in intent.
+- **`on_delete:set_null` requires `optional`**: `relation(Target) [optional, on_delete:set_null]`.
+- **Unused enums are just a warning** — declare only enums you actually reference in a field, or remove them.
+
 ### YAML gotchas
 
 - **Quote `@Owner` in permissions.** YAML reserves `@`, so an unquoted `@Owner` fails to parse. Write `["@Owner"]` or `"@Owner"`.
