@@ -6,48 +6,73 @@ license: MIT
 
 # DomainCraft — C# Bridge (ASP.NET Core REST API)
 
-You are a C#/.NET engineer working on code that DomainCraft generated from `domain.yaml` through the `csharp-restful` bridge. You get a ready **production-quality REST API**: EF Core + PostgreSQL, JWT auth, clean architecture, migrations — and you don't have to write it.
+You are a C#/.NET engineer working on code that DomainCraft generated from `domain.yaml` through the `csharp-restful` bridge. The domain rules live in the **core skill** — load it first; this skill only covers the *generated* C# side (architecture, features, where to write code, how to run it).
 
-## First load the base skill
+## Architecture that is generated
 
-This skill sits on top of DomainCraft. **Load/use the `domaincraft-core` skill before working**: it describes the model in `domain.yaml` and the JSON schema — your C# logic implements exactly that model. That is where the domain and its constraints live.
+Clean architecture, one solution, four projects + tests:
 
-## Pain this bridge removes
+```
+<Project.Name>.sln
+├─ src/Domain/            entities, shared enums, PagedResult (no dependencies)
+├─ src/Application/       interfaces + services + security (port layer, no EF)
+│   ├─ Services/I<Entity>Service.cs      public API of each entity
+│   ├─ Services/<Entity>Service.cs       YOUR custom partial (overwrite: false)
+│   ├─ Generated/<Entity>Service.g.cs    generated partial — DO NOT TOUCH
+│   ├─ Security/          PermissionService, OwnerResolver, password hasher iface
+│   ├─ Repositories/      IRepository + I<Entity>Repository
+│   └─ Caching|Email|Storage|Events/     ports (ICacheService, IEmailService, ...)
+├─ src/Infrastructure/    EF Core: DomainDbContext, Configurations/, Migrations/, repositories, BcryptPasswordHasher, in-memory impls
+├─ src/WebApi/            controllers (api/<Plural>), auth controller, Program.cs, appsettings.*, health checks
+├─ tests/                 xUnit integration test project (WebApplicationFactory + EF InMemory)
+├─ docs/                  ProjectSummary.md + docs/Entities/<Entity>.md
+├─ deploy/k8s/            deployment, service, ingress
+└─ docker-compose.yml     postgres + api (+ dapr / seq / jaeger if addons)
+```
 
-- CRUD wiring: controllers, repositories, DTOs, EF mappings, migrations, DI registration — generated and maintained automatically.
-- JWT auth, roles, and endpoints (`login`, `register`, `me`) are already set up.
-- On schema changes only the machine parts regenerate; your code is never clobbered.
+## What you get out of the box (features)
 
-## What sits in the generated code (zones)
+- **CRUD REST** — `[ApiController]` per entity at `api/<Plural>`, endpoints `GET`, `GET {id}`, `POST`, `PUT {id}`, `PATCH {id}`, `DELETE {id}`, paged list. Authorization attributes come straight from the entity `permissions` block.
+- **Auth (if `auth.type: jwt`)** — `/login`, `/register`, `/me` on `api/<AuthEntity>`, bcrypt hashing, JWT bearer; roles validated against `auth.roles`.
+- **Persistence** — EF Core + Npgsql; entity configurations, migrations via `dotnet ef` (bridge owns the SQL; run with `domaincraft generate --migrate`).
+- **Entity features map to code** — `audit`/`audit_log` add `CreatedAt`/`CreatedBy`/... fields; `soft_delete` makes `DELETE` set `DeletedAt` instead of removing; `optimistic_lock` adds a `version` concurrency token; `event_sourced`/`cacheable` wire `IEventPublisher`/`ICacheService` into the generated service.
+- **Ports & adapters** — `ICacheService`, `IEmailService`, `IStorageService`, `IEventPublisher` with in-process implementations by default; with `--addons dapr` they swap to Dapr-backed implementations plus `dapr/components/*.yaml`. No app-code changes needed to swap.
+- **Observability** — Swagger UI, `/health`, `/health/ready`, `/health/live`; Serilog; optional API versioning; `--addons observability` adds Seq + Jaeger to compose.
+- **Seed data** — `DomainSeeder` when entities declare `seed:`.
+- **Deploy** — `Dockerfile`, `docker-compose.yml`, `deploy/k8s/*`.
 
-Split into **Generated** (machine-owned, overwritten) and **custom** (yours, `overwrite: false`).
+## Run it immediately
 
-### Auto-generated (`*.g.cs`) — DO NOT TOUCH
+The generated output is a ready solution — no hand-written wiring:
 
-- Controllers, base services, entities, DB context, DTOs, mapping profiles.
-- Any edit is lost on the next `generate`.
+```bash
+docker compose up -d --build      # postgres + api (+ dapr/seq/jaeger if addons)
+domaincraft generate --migrate --domain domain.yaml --bridge csharp-restful --output .
+# ...or, after the stack is up:  dotnet ef database update --project src/Infrastructure --startup-project src/WebApi
+dotnet test                        # xUnit integration tests
+```
 
-### Your files (custom) — BUSINESS LOGIC LIVES HERE
+- API: `http://localhost:<project.deploy.port>` (default **8080**); Swagger at `/swagger`.
+- Health: `/health`, `/health/ready`, `/health/live`. Auth endpoints: `POST api/<AuthEntity>/login`, `/register`, `/me`.
+- `docker compose up -d postgres` starts just the DB if you want to run the API with `dotnet run` instead.
 
-- `src/Application/Services/<Entity>Service.cs` — `partial`, where you implement business-logic hooks.
-- The generated `.g.cs` calls your hooks — put logic in them:
-  - `OnBeforeCreate` / `OnBeforeUpdate` / `OnBeforeDelete`
-  - and any other per-entity extension points.
-- Hooks run inside the ready CRUD — validate data, checks, and rules without touching the generated wiring.
-- Built on the `partial` mechanic: only `*.g.cs` is regenerated, your custom code survives.
+## Where your code goes
+
+Everything under `*.g.cs` (controllers, services, entities, DbContext, DTOs, Program.cs) is regenerated on every `generate` — **never edit it**.
+
+Your only owned zone is the custom partial:
+
+- `src/Application/Services/<Entity>Service.cs` — scaffolded once (`overwrite: false`). The generated `.g.cs` partial calls these hooks inside CRUD — implement them here:
+  - `partial void OnBeforeCreate(<Entity> entity)`
+  - `partial void OnBeforeUpdate(<Entity> entity)`
+  - `partial void OnBeforeDelete(<Entity> entity)`
+- Hooks run before `SaveChangesAsync`, so you can validate, enforce invariants, and mutate `entity` safely. Register the service via DI with `I<Entity>Service → <Entity>Service` (already wired).
+- For cross-entity or transactional logic (e.g. a wallet transfer touching two ledgers), inject the needed `I<Entity>Service`/repositories into your own Application services rather than reaching into generated code.
 
 ## Working rules
 
-1. Do not edit `*.g.cs` or other generated files — they get overwritten.
-2. Put all business logic in custom `partial` files (`Services/<Entity>Service.cs`) and their hooks.
-3. The `domain.yaml` schema is the single source of fields/relations; in code reference the generated entities, don't add fields by hand.
-4. Declare entity renames via `old_name` (see core skill) — the bridge renames your custom files too.
-5. Don't read the whole generated code without need — it is large and regenerated often. Knowing the entity API and the hook points is enough.
-
-## Your responsibility
-
-- Business rules in hooks (validation, intra-entity authorization, relation consistency, notifications).
-- Additional services/models not covered by the domain.
-- Integrating the ready CRUD with external systems.
-
-Everything else — boilerplate CRUD, infrastructure, auth, migrations — is generated automatically and refreshed with a single `generate`.
+1. Never edit `*.g.cs` or other generated files — they are overwritten.
+2. Put business logic in custom partials (`Services/<Entity>Service.cs`) and their hooks.
+3. Model changes come from `domain.yaml` only — regenerate, don't hand-edit entities.
+4. Renames: declare `old_name` in `domain.yaml`; the bridge renames your custom partial too.
+5. Don't read generated code beyond what you need — the entity API and hook points above are enough to start.

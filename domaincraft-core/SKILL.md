@@ -23,7 +23,7 @@ The authoritative list of allowed keys, field types, features, `on_delete` value
 
 ### Model constructs (summary — details in the schema)
 
-- **top-level keys:** `project`, `database`, `api_style`, `auth`, `entities`, `enums` (details in the schema).
+- **Where keys live.** Only `project:` and `auth:` are nested blocks. `database`, `api_style`, `entities`, and `enums` are **top-level — siblings of `project:`, NOT inside it**. Nesting `database`/`api_style` under `project` fails with `yaml: unmarshal errors: ... database not found in type parser.ProjectConfig`.
 - **Field definition strings** — every field in `fields:` is a string: `<type> [modifiers]`, e.g. `string [required, max:255]`. Types: `string`, `text`, `int`, `bigint`, `float`, `decimal`, `boolean`, `date`, `datetime`, `uuid`, `json`, `jsonb`, `array(Type)`, `enum(Name)`.
 - **Relations are fields, not a separate key — there is no `relations:` block.** Declare a relation as a field whose type is `relation(Target)`:
   - `orderId: relation(Order) [required, on_delete:cascade]` — many-to-one (FK).
@@ -31,6 +31,7 @@ The authoritative list of allowed keys, field types, features, `on_delete` value
   - `tags: relation(Tag) [many]` — many-to-many.
   - `profile: relation(Profile) [optional, unique]` — one-to-one.
   - `on_delete` values: `cascade`, `restrict`, `set_null`, `no_action`.
+   - `relation(Target)` already creates the FK column (e.g. `OrderId`) and any inverse side — do **not** add a separate scalar `XxxId` field for it, and **never repeat a field name**. Declaring `buyerId` twice (once `uuid`, once `relation(...)`) is invalid.
 - **field modifiers:** `required`, `optional`, `unique`, `hidden`, `primary`, `email`, `url`, `ipv4`, `many`, `min:N`, `max:N`, `gte:N`, `gt:N`, `lte:N`, `lt:N`, `regex:"..."`, `default:...`.
 - **`features:`** per entity — `audit`, `audit_log`, `soft_delete`, `optimistic_lock`, `event_sourced`, `cacheable` (auto-add `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`).
 - **`auth:`** — `type` (`jwt`, `none`), `entity`, `roles`, `endpoints` (`login`, `register`, `me`). With `type: jwt` the csharp bridge generates the `/login`, `/register`, `/me` endpoints and JWT token issuance; the auth entity needs `email` and `password` fields.
@@ -41,7 +42,7 @@ Roles (other than `*`, `@Owner`) must be declared in `auth.roles`. The auth enti
 
 ### Rules every model must satisfy (fix these or validation fails)
 
-- **Exactly one primary key.** Every entity needs one field marked `[primary]` (e.g. `id: uuid [primary]`). Omitting it → `entity must have at least one primary key (add a field marked [primary]...)`.
+- **Exactly one primary key — on EVERY entity.** Add `id: uuid [primary]` to each entity. Omitting it on any single entity fails the whole validation: `entity must have at least one primary key (add a field marked [primary]...)`.
 - **Enums go in two places.** Declare the enum in the top-level `enums:` block AND reference it with the `enum(...)` wrapper: `status: enum(OrderStatus)`. A bare `OrderStatus` as a type is NOT valid — the `unknown type` error now explicitly says to use `enum(EnumName)`.
 - **`min`/`max` are string length, not numeric bounds.** For numbers use `gte`/`gt`/`lte`/`lt`: `price: decimal [required, gte:0]`. Writing `min:0` on a `decimal` only produces a warning, but it's a bug in intent.
 - **`on_delete:set_null` requires `optional`**: `relation(Target) [optional, on_delete:set_null]`.
@@ -57,16 +58,18 @@ Roles (other than `*`, `@Owner`) must be declared in `auth.roles`. The auth enti
 ```yaml
 project:
   name: MyApp
+database: postgresql          # top-level — sibling of project, not nested
+api_style: rest               # top-level — sibling of project, not nested
 entities:
   OrderItem:
     fields:
-      id: uuid [primary]
+      id: uuid [primary]      # every entity needs exactly one [primary]
   Order:
     fields:
       id: uuid [primary]
       number: string [required, unique]
       total: decimal [required, gte:0]
-      items: relation(OrderItem) [many]
+      items: relation(OrderItem) [many]   # FK column is created for you
 ```
 
 ## What is generated for you (do not touch)
