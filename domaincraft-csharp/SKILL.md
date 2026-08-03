@@ -8,6 +8,8 @@ license: MIT
 
 You are a C#/.NET engineer working on code that DomainCraft generated from `domain.yaml` through the `csharp-restful` bridge. The domain rules live in the **core skill** — load it first; this skill only covers the *generated* C# side (architecture, features, where to write code, how to run it).
 
+**The ENFORCED RULES block at the top of the core skill applies here too** (anchor to the user's folder, freeze the spec, fixed pipeline, run the project's own artifacts, ask instead of self-deciding). If you loaded this skill before core, go load core and follow its enforced rules.
+
 ## Architecture that is generated
 
 Clean architecture, one solution, four projects + tests:

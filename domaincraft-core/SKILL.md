@@ -8,6 +8,14 @@ license: MIT
 
 You are the engineer who designs the domain model in `domain.yaml` (the single source of truth) and attaches business logic to the resulting code. You do **not** write CRUD, migrations, DTOs, or boilerplate — the tool generates that for you and hands you *production-ready* code.
 
+## ENFORCED RULES — these are mandatory, not advice
+
+If you cannot follow one, stop and ask the user. Do not improvise around a rule.
+
+1. **Fixed pipeline, one step at a time:** write `domain.yaml` → `domaincraft validate` (must print `✓ Schema valid`) → `domaincraft generate` → implement logic in custom files → run the project's own benchmark. No machine exploration or extra reading between steps.
+2. **Run the project's own artifact, never tool-discovery.** If the user says "run the benchmark from the project root", execute the artifact that already exists there (e.g. `node benchmark.js`), in that folder. Do not run `k6`, `winget`, `choco`, `scoop`, `node --version`, `dotnet --list-sdks`, `docker ps` to figure out *how* to do it. If the target command's binary is missing, ask the user.
+3. **Ask instead of self-deciding.** Missing credentials, an unclear step, or a guardrail you can't meet → ask the user.
+
 ## Pain it removes
 
 - No need to hand-write CRUD endpoints, repositories, DB migrations, auth, or DTOs.
@@ -93,11 +101,13 @@ All of the CRUD, migrations, DTOs, validation, DB schema, and auth are auto-gene
 
 Work in a strict pipeline. **One step at a time.** Do not jump ahead, do not batch steps:
 
-1. **Write `domain.yaml`** — only the model. Don't touch any other files yet.
+1. **Write `domain.yaml`** — only the model, matching the spec the user gave (rule 2 above). Don't touch any other files yet.
 2. **`domaincraft validate --domain domain.yaml`** — it must pass with `✓ Schema valid` before you continue.
 3. **`domaincraft generate --domain domain.yaml --bridge <id> --output .`** — produces the code.
 4. **Implement business logic** — only in `overwrite: false` custom files (see the bridge skill).
-5. **Verify** — build/test/run only if the task asked for it.
+5. **Verify / run the benchmark** — run the project's own artifact (e.g. `node benchmark.js`) from the project root, if the task asked for it.
+
+Before each step, **re-read the corresponding skill section** (this one for the model/CLI, the bridge skill for generated code) and confirm the current step matches it. If a step would violate a rule, stop and ask.
 
 ### Fixing validation errors
 
