@@ -7,7 +7,7 @@ This repo ships two cooperating skills:
 | Skill | Folder | What it covers |
 |-------|--------|----------------|
 | **DomainCraft Core** | `domaincraft-core/` | Modeling the domain in `domain.yaml` — entities, fields, relations, features, auth, permissions; the CLI workflow; the full JSON spec of what you can use. |
-| **DomainCraft C# Bridge** | `domaincraft-csharp/` | Working with the generated ASP.NET Core REST API (EF Core + PostgreSQL + JWT): which files are generated for you and where your business logic goes. |
+| **DomainCraft C# Bridge** | `domaincraft-csharp/` | The *generated* ASP.NET Core REST API (EF Core + PostgreSQL + JWT): the architecture it produces, out-of-the-box features, how to run the stack (docker compose), and where your business logic goes. Builds on the Core skill — it never repeats the domain rules. |
 
 ## Overview
 

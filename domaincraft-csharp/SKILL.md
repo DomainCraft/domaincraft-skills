@@ -56,6 +56,8 @@ dotnet test                        # xUnit integration tests
 - Health: `/health`, `/health/ready`, `/health/live`. Auth endpoints: `POST api/<AuthEntity>/login`, `/register`, `/me`.
 - `docker compose up -d postgres` starts just the DB if you want to run the API with `dotnet run` instead.
 
+**When the task asks to run the system, run `docker compose up -d --build` right away** — no pre-checks of what's installed or already running (`docker ps`, `docker --version`, `dotnet --list-sdks`, `Get-Service`, `psql`, port checks). Start the stack; only look at an error if the command actually fails. If you lack info it can't come from (credentials, a port conflict, a missing SDK), **ask the user** — don't probe the machine.
+
 ## Where your code goes
 
 Everything under `*.g.cs` (controllers, services, entities, DbContext, DTOs, Program.cs) is regenerated on every `generate` — **never edit it**.

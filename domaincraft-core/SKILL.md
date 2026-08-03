@@ -89,12 +89,34 @@ All of the CRUD, migrations, DTOs, validation, DB schema, and auth are auto-gene
    - `--prune` — auto-clean orphaned files during refactoring (for CI).
    - `--migrate` — run DB migrations described by the bridge.
 
-## How to work
+## How to work — follow this order, nothing else
 
-1. First `validate` — make sure the model is clean.
-2. Then `generate` — you get ready CRUD.
-3. Write business logic in custom files (the `overwrite: false` zones), not in generated ones.
-4. When the model changes, re-run `generate`; generated files refresh, your custom code survives.
+Work in a strict pipeline. **One step at a time.** Do not jump ahead, do not batch steps:
+
+1. **Write `domain.yaml`** — only the model. Don't touch any other files yet.
+2. **`domaincraft validate --domain domain.yaml`** — it must pass with `✓ Schema valid` before you continue.
+3. **`domaincraft generate --domain domain.yaml --bridge <id> --output .`** — produces the code.
+4. **Implement business logic** — only in `overwrite: false` custom files (see the bridge skill).
+5. **Verify** — build/test/run only if the task asked for it.
+
+### Fixing validation errors
+
+- Fix **exactly the reported error**, then re-run `validate`. One fix → one validate. Do not "also improve" the model or reformat unrelated fields in the same pass — that is how duplicate/conflicting fields sneak in.
+- Re-read the error string and fix that specific cause; do not guess or rewrite large chunks.
+
+### Do NOT (unprompted environment discovery)
+
+Only run commands that advance the current step. Everything below is out of scope unless the user explicitly asks:
+
+- When the task needs the system running (a DB, the API), **start the generated `docker compose up -d --build` immediately** — do not first inspect what's on the machine (`docker ps`, `docker --version`, `dotnet --list-sdks`, `Get-Service`, `Test-NetConnection`, `psql`/`pg_isready`, port scans). The compose file is the contract for how the stack runs; run it, don't verify the environment first.
+- Do **not** run `domaincraft --version` (no such flag — use `domaincraft bridges` or `domaincraft --help` if you need capability info).
+- Do **not** read the whole generated tree or every generated file. Read only what a step requires (a custom partial, a repository signature). The bridge skill lists what you need.
+- Do **not** generate before validation passes.
+- Do **not** add files, migrations, or infrastructure that the tool already generates.
+
+### When a step depends on something the user hasn't provided
+
+Stop and ask. Do not discover it yourself: DB credentials, an empty port, a bridge not listed, a missing SDK — ask the user, don't probe the machine.
 
 ## Golden rule
 
