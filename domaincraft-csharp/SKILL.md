@@ -63,7 +63,7 @@ dotnet test                        # xUnit integration tests
 
 Add a field literally named `role` to the auth entity in `domain.yaml` (e.g. `role: string [required, default:"User"]` or `role: enum(Role) [required]`). The bridge detects it and emits the value as a JWT `ClaimTypes.Role` claim on login — this is what makes `[Authorize(Roles="Admin")]` and the entity `permissions` blocks work. Without a `role` field on the auth entity, every user has no role claim and role-restricted endpoints reject everyone.
 
-**When the task asks to run the system, run `docker compose up -d --build` right away** — no pre-checks of what's installed or already running (`docker ps`, `docker --version`, `dotnet --list-sdks`, `Get-Service`, `psql`, port checks). Start the stack; only look at an error if the command actually fails. If you lack info it can't come from (credentials, a port conflict, a missing SDK), **ask the user** — don't probe the machine.
+**When the task asks to run the system, run `docker compose up -d --build` right away** — the core skill's "Do NOT probe the machine" rules apply here too.
 
 ## Where your code goes
 
