@@ -36,6 +36,7 @@ Clean architecture, one solution, four projects + tests:
 
 - **CRUD REST** — `[ApiController]` per entity at `api/<Plural>`, endpoints `GET`, `GET {id}`, `POST`, `PUT {id}`, `PATCH {id}`, `DELETE {id}`, paged list. Authorization attributes come straight from the entity `permissions` block.
 - **Auth (if `auth.type: jwt`)** — `/login`, `/register`, `/me` on `api/<AuthEntity>`, bcrypt hashing, JWT bearer; roles validated against `auth.roles`.
+- **Platform** — target framework defaults to `net10.0` (override with `project.platform` in `domain.yaml`).
 - **Persistence** — EF Core + Npgsql; entity configurations, migrations via `dotnet ef` (bridge owns the SQL; run with `domaincraft generate --migrate`).
 - **Entity features map to code** — `audit`/`audit_log` add `CreatedAt`/`CreatedBy`/... fields; `soft_delete` makes `DELETE` set `DeletedAt` instead of removing; `optimistic_lock` adds a `version` concurrency token; `event_sourced`/`cacheable` wire `IEventPublisher`/`ICacheService` into the generated service.
 - **Ports & adapters** — `ICacheService`, `IEmailService`, `IStorageService`, `IEventPublisher` with in-process implementations by default; with `--addons dapr` they swap to Dapr-backed implementations plus `dapr/components/*.yaml`. No app-code changes needed to swap.
@@ -57,6 +58,10 @@ dotnet test                        # xUnit integration tests
 - API: `http://localhost:<project.deploy.port>` (default **8080**); Swagger at `/swagger`.
 - Health: `/health`, `/health/ready`, `/health/live`. Auth endpoints: `POST api/<AuthEntity>/login`, `/register`, `/me`.
 - `docker compose up -d postgres` starts just the DB if you want to run the API with `dotnet run` instead.
+
+## How roles reach the API
+
+Add a field literally named `role` to the auth entity in `domain.yaml` (e.g. `role: string [required, default:"User"]` or `role: enum(Role) [required]`). The bridge detects it and emits the value as a JWT `ClaimTypes.Role` claim on login — this is what makes `[Authorize(Roles="Admin")]` and the entity `permissions` blocks work. Without a `role` field on the auth entity, every user has no role claim and role-restricted endpoints reject everyone.
 
 **When the task asks to run the system, run `docker compose up -d --build` right away** — no pre-checks of what's installed or already running (`docker ps`, `docker --version`, `dotnet --list-sdks`, `Get-Service`, `psql`, port checks). Start the stack; only look at an error if the command actually fails. If you lack info it can't come from (credentials, a port conflict, a missing SDK), **ask the user** — don't probe the machine.
 

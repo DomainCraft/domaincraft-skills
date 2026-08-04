@@ -42,11 +42,13 @@ The authoritative list of allowed keys, field types, features, `on_delete` value
    - `relation(Target)` already creates the FK column (e.g. `OrderId`) and any inverse side — do **not** add a separate scalar `XxxId` field for it, and **never repeat a field name**. Declaring `buyerId` twice (once `uuid`, once `relation(...)`) is invalid.
 - **field modifiers:** `required`, `optional`, `unique`, `hidden`, `primary`, `email`, `url`, `ipv4`, `many`, `min:N`, `max:N`, `gte:N`, `gt:N`, `lte:N`, `lt:N`, `regex:"..."`, `default:...`.
 - **`features:`** per entity — `audit`, `audit_log`, `soft_delete`, `optimistic_lock`, `event_sourced`, `cacheable` (auto-add `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`).
-- **`auth:`** — `type` (`jwt`, `none`), `entity`, `roles`, `endpoints` (`login`, `register`, `me`). With `type: jwt` the csharp bridge generates the `/login`, `/register`, `/me` endpoints and JWT token issuance; the auth entity needs `email` and `password` fields.
+- **`auth:`** — `type` (`jwt`, `none`), `entity`, `roles`, `endpoints` (`login`, `register`, `me`). With `type: jwt` the auth entity needs `email` and `password` fields. *How the JWT endpoints and token are actually generated is bridge-specific — see the bridge skill.*
 - **`permissions:`** per entity — `read`/`create`/`update`/`delete` role arrays, tokens `*` (everyone) and `@Owner` (record owner).
 - **`seed:`** — starter data; also `indexes`, `old_name`, `cache`, event-sourcing.
 
 Roles (other than `*`, `@Owner`) must be declared in `auth.roles`. The auth entity must have `email` and `password` fields.
+
+**Roles on the auth entity:** declare a field named `role` on the auth entity (e.g. `role: string [required, default:"User"]` or `role: enum(Role) [required]`). Each bridge decides how that field maps to authorization (JWT claims, attributes, policies) — see the bridge skill for the language-specific mechanism.
 
 ### Rules every model must satisfy (fix these or validation fails)
 
@@ -87,10 +89,9 @@ All of the CRUD, migrations, DTOs, validation, DB schema, and auth are auto-gene
 ## Your areas of responsibility
 
 1. **Write `domain.yaml`** — model entities, relations, features, and permissions.
-2. **Attach business logic to the ready CRUD** — work on top of generated scaffolds in custom files (`overwrite: false`): hooks, partial methods, service implementations.
+2. **Attach business logic to the ready CRUD** — work on top of generated scaffolds in custom files (`overwrite: false`): hooks, extension points, service implementations. The exact hook shapes are bridge-specific — see the bridge skill.
 3. **Renames** — declare `old_name: <previous name>` on an entity so the tool renames custom files and warns about breaking changes.
 4. **CLI commands:**
-   - `domaincraft new` — create a project.
    - `domaincraft validate` — validate `domain.yaml`.
    - `domaincraft bridges` — list available bridges (C#, admin, Go, …).
    - `domaincraft generate --domain domain.yaml --bridge <id>` — generate code.
@@ -119,8 +120,8 @@ Before each step, **re-read the corresponding skill section** (this one for the 
 Only run commands that advance the current step. Everything below is out of scope unless the user explicitly asks:
 
 - When the task needs the system running (a DB, the API), **start the generated `docker compose up -d --build` immediately** — do not first inspect what's on the machine (`docker ps`, `docker --version`, `dotnet --list-sdks`, `Get-Service`, `Test-NetConnection`, `psql`/`pg_isready`, port scans). The compose file is the contract for how the stack runs; run it, don't verify the environment first.
-- Do **not** run `domaincraft --version` (no such flag — use `domaincraft bridges` or `domaincraft --help` if you need capability info).
-- Do **not** read the whole generated tree or every generated file. Read only what a step requires (a custom partial, a repository signature). The bridge skill lists what you need.
+- Do **not** probe the machine's toolchain (`node --version`, `dotnet --list-sdks`, `docker --version`, port scans). If you need capability info the project can't provide, ask the user. `--version`, `--help`, and `bridges` are for the CLI's own capabilities; they will not tell you what is installed.
+- Do **not** read the whole generated tree or every generated file. Read only what a step requires (a custom file, a service/repository signature). The bridge skill lists what you need.
 - Do **not** generate before validation passes.
 - Do **not** add files, migrations, or infrastructure that the tool already generates.
 
