@@ -16,15 +16,7 @@ If you cannot follow one, stop and ask the user. Do not improvise around a rule.
 2. **Run the project's own artifact, never tool-discovery.** If the user says "run the benchmark from the project root", execute the artifact that already exists there (e.g. `node benchmark.js`), in that folder. Do not run `k6`, `winget`, `choco`, `scoop`, `node --version`, `dotnet --list-sdks`, `docker ps` to figure out *how* to do it. If the target command's binary is missing, ask the user.
 3. **Ask instead of self-deciding.** Missing credentials, an unclear step, or a guardrail you can't meet → ask the user.
 
-## How to work — follow this order, nothing else
-
-1. **Write `domain.yaml`** — only the model, matching the spec the user gave (rule 1 above). Don't touch any other files yet.
-2. **`domaincraft validate --domain domain.yaml`** — must pass with `✓ Schema valid` before you continue.
-3. **`domaincraft generate --domain domain.yaml --bridge <id> --output .`** — produces the code.
-4. **Implement business logic** — only in `overwrite: false` custom files (see the bridge skill).
-5. **Verify / run the benchmark** — run the project's own artifact from the project root, if the task asked for it.
-
-Before each step, re-read the matching section (this skill for the model/CLI, the bridge skill for generated code). If a step would violate a rule, stop and ask.
+Follow the rule-1 pipeline in order: write `domain.yaml` → `validate` → `generate` → implement logic only in `overwrite: false` custom files → run the project's own artifact. Before each step, re-read the matching section (this skill for the model/CLI, the bridge skill for generated code). If a step would violate a rule, stop and ask.
 
 ### Fixing validation errors
 
@@ -55,7 +47,7 @@ Only run commands that advance the current step:
 1. **Write `domain.yaml`** — model entities, relations, features, and permissions.
 2. **Attach business logic to the ready CRUD** — in custom files (`overwrite: false`): hooks, extension points, service implementations. Exact hook shapes are bridge-specific — see the bridge skill.
 3. **Renames** — declare `old_name: <previous name>` on an entity so the tool renames custom files and warns about breaking changes.
-4. **CLI commands:** `domaincraft validate` · `domaincraft generate --domain domain.yaml --bridge <id>` · `domaincraft bridges` · `--prune` (auto-clean orphaned files, CI) · `--migrate` (run bridge-declared DB migrations).
+4. **CLI commands:** `domaincraft validate` · `domaincraft generate --domain domain.yaml --bridge <id>` · `domaincraft bridges` · `--prune` (auto-clean orphaned files, CI) · `--migrate` (run bridge-declared DB migrations) · `--admin` (also generate an admin panel, written to `<output>/admin/`).
 
 ## Reference — the model contract
 
@@ -72,9 +64,10 @@ The authoritative list of allowed keys, field types, features, `on_delete` value
   - `profile: relation(Profile) [optional, unique]` — one-to-one.
   - `on_delete` values: `cascade`, `restrict`, `set_null`, `no_action`.
   - `relation(Target)` already creates the FK column (e.g. `OrderId`) and any inverse side — do **not** add a separate scalar `XxxId` field for it, and **never repeat a field name**. Declaring `buyerId` twice (once `uuid`, once `relation(...)`) is invalid.
-- **field modifiers:** `required`, `optional`, `unique`, `hidden`, `primary`, `email`, `url`, `ipv4`, `many`, `min:N`, `max:N`, `gte:N`, `gt:N`, `lte:N`, `lt:N`, `regex:"..."`, `default:...`.
+- **field modifiers:** `required`, `optional`, `unique`, `hidden`, `readonly`, `primary`, `email`, `url`, `ipv4`, `many`, `min:N`, `max:N`, `gte:N`, `gt:N`, `lte:N`, `lt:N`, `regex:"..."`, `default:...`.
+  - **`hidden` vs `readonly`:** `hidden` (`internalNotes: string [hidden, optional]`) excludes a field from API **responses** (it stays client-settable via requests). `readonly` (`balance: decimal [required, readonly, gte:0]`) does the **opposite** — it is persisted and returned in responses but **excluded from create/update/patch requests** and from request→entity mapping, so it is server-owned (a read-only value the client must not write). Pick `readonly` for computed/ledger values the client must read but never set; pick `hidden` for values the client must never read.
 - **`features:`** per entity — `audit`, `audit_log`, `soft_delete`, `optimistic_lock`, `event_sourced`, `cacheable` (auto-add `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`).
-- **`auth:`** — `type` (`jwt`, `none`), `entity`, `roles`, `endpoints` (`login`, `register`, `me`). With `type: jwt` the auth entity needs `email` and `password` fields. *How the JWT endpoints and token are actually generated is bridge-specific — see the bridge skill.*
+- **`auth:`** — `type` (`jwt`, `none`), `entity`, `roles`, `endpoints` (`login`, `register`, `me`, `setup`). With `type: jwt` the auth entity needs `email` and `password` fields. `setup` bootstraps the first user with the first declared role (typically `Admin`) and only succeeds while no account exists — it is the production bootstrap path. *How the JWT endpoints and token are actually generated is bridge-specific — see the bridge skill.*
 - **`permissions:`** per entity — `read`/`create`/`update`/`delete` role arrays, tokens `*` (everyone) and `@Owner` (record owner).
 - **`seed:`** — starter data; also `indexes`, `old_name`, `cache`, event-sourcing.
 
@@ -95,6 +88,10 @@ Roles (other than `*`, `@Owner`) must be declared in `auth.roles`. The auth enti
 - **Quote `@Owner` in permissions.** YAML reserves `@`, so an unquoted `@Owner` fails to parse. Write `["@Owner"]` or `"@Owner"`.
 - **No space after `:` inside a field definition string.** `default: 5` is read by YAML as a nested mapping. Write `default:5` (or `default:"pending"` for quoted string values).
 
+### What is generated for you (do not touch)
+
+All of the CRUD, migrations, DTOs, validation, DB schema, and auth are auto-generated files — **do not hand-edit them**; they are overwritten when `domain.yaml` changes. This is the Golden rule above applied to concrete files.
+
 ### Minimal model example
 
 ```yaml
@@ -113,7 +110,3 @@ entities:
       total: decimal [required, gte:0]
       items: relation(OrderItem) [many]   # FK column is created for you
 ```
-
-## What is generated for you (do not touch)
-
-All of the CRUD, migrations, DTOs, validation, DB schema, and auth are auto-generated files — **do not hand-edit them**; they are overwritten when `domain.yaml` changes.

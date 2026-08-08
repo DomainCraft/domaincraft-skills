@@ -25,8 +25,8 @@ Clean architecture, one solution, four projects + tests:
 │   ├─ Repositories/      IRepository + I<Entity>Repository
 │   └─ Caching|Email|Storage|Events/     ports (ICacheService, IEmailService, ...)
 ├─ src/Infrastructure/    EF Core: DomainDbContext, Configurations/, Migrations/, repositories, BcryptPasswordHasher, in-memory impls
-├─ src/WebApi/            controllers (api/<Plural>), auth controller, Program.cs, appsettings.*, health checks
-├─ tests/                 xUnit integration test project (WebApplicationFactory + EF InMemory)
+├─ src/WebApi/            controllers (api/<Plural>), auth controller, thin Program.cs + Extensions/*.g.cs (DI + pipeline), appsettings.*, health checks
+├─ tests/                 xUnit integration test project (WebApplicationFactory + Testcontainers PostgreSQL — real DB, real FK/cascade/SQL)
 ├─ docs/                  ProjectSummary.md + docs/Entities/<Entity>.md
 ├─ deploy/k8s/            deployment, service, ingress
 └─ docker-compose.yml     postgres + api (+ dapr / seq / jaeger if addons)
@@ -35,7 +35,8 @@ Clean architecture, one solution, four projects + tests:
 ## What you get out of the box (features)
 
 - **CRUD REST** — `[ApiController]` per entity at `api/<Plural>`, endpoints `GET`, `GET {id}`, `POST`, `PUT {id}`, `PATCH {id}`, `DELETE {id}`, paged list. Authorization attributes come straight from the entity `permissions` block.
-- **Auth (if `auth.type: jwt`)** — `/login`, `/register`, `/me` on `api/<AuthEntity>`, bcrypt hashing, JWT bearer; roles validated against `auth.roles`.
+- **Auth (if `auth.type: jwt`)** — `/login`, `/register`, `/me`, `/setup` on `api/<AuthEntity>`, bcrypt hashing, JWT bearer; roles validated against `auth.roles`. `/setup` bootstraps the **first** user with the `Admin` role (or the first role declared in `auth.roles`) and only works while no account exists (then `409`), so it is safe to expose publicly. The auth controller calls an `IAuthService` port (no direct `DbContext` access): `LoginAsync`, `EmailExistsAsync`, `RegisterAsync`, `GetByIdAsync`, `SetupFirstAdminAsync`. The implementation is a Generation-Gap partial like entity services — generated `Generated/AuthService.g.cs` + your custom `Services/AuthService.cs` (scaffolded once) with an `OnBeforeRegisterAsync(<AuthEntity> entity, CancellationToken ct)` hook (return `HookResult.Fail("reason")` to reject registration). Register it via DI as `IAuthService → AuthService` (already wired).
+- **Readonly fields** — a `readonly` modifier in `domain.yaml` (`balance: decimal [required, readonly, gte:0]`) makes the field appear in the **response DTO** and `MapToDto` but **excluded from `Create/Update` request DTOs, `MapCreateRequestToEntity`/`MapUpdateRequestToEntity`, and `ApplyPatch`** — the client can read it but never set it; the server owns it. (Contrast `hidden`, which drops the field from responses but leaves it client-settable.)
 - **Platform** — target framework defaults to `net10.0` (override with `project.platform` in `domain.yaml`).
 - **Persistence** — EF Core + Npgsql; entity configurations, migrations via `dotnet ef` (bridge owns the SQL; run with `domaincraft generate --migrate`).
 - **Entity features map to code** — `audit`/`audit_log` add `CreatedAt`/`CreatedBy`/... fields; `soft_delete` makes `DELETE` set `DeletedAt` instead of removing; `optimistic_lock` adds a `version` concurrency token; `event_sourced`/`cacheable` wire `IEventPublisher`/`ICacheService` into the generated service.
@@ -52,12 +53,26 @@ The generated output is a ready solution — no hand-written wiring:
 docker compose up -d --build      # postgres + api (+ dapr/seq/jaeger if addons)
 domaincraft generate --migrate --domain domain.yaml --bridge csharp-restful --output .
 # ...or, after the stack is up:  dotnet ef database update --project src/Infrastructure --startup-project src/WebApi
-dotnet test                        # xUnit integration tests
+dotnet test                        # xUnit integration tests (needs Docker: spins up real PostgreSQL via Testcontainers)
 ```
 
 - API: `http://localhost:<project.deploy.port>` (default **8080**); Swagger at `/swagger`.
-- Health: `/health`, `/health/ready`, `/health/live`. Auth endpoints: `POST api/<AuthEntity>/login`, `/register`, `/me`.
+- Health: `/health`, `/health/ready`, `/health/live`. Auth endpoints: `POST api/<AuthEntity>/login`, `/register`, `/me`, `/setup`.
 - `docker compose up -d postgres` starts just the DB if you want to run the API with `dotnet run` instead.
+
+## Integration tests run against real PostgreSQL
+
+`dotnet test` does **not** use an in-memory mock — it boots a `WebApplicationFactory<Program>` against a **real PostgreSQL** container via Testcontainers, so FK constraints, unique indexes, `on_delete` cascades and SQL translation behave exactly like production. **Requires Docker.** Each test gets its own database (dropped in teardown); seed data is inserted directly into the `DbContext` (bypassing HTTP permissions on purpose — the HTTP permission path is covered by its own dedicated tests).
+
+### What the generated tests cover
+
+The generated tests (split into `ApiTests.g.cs` / `AuthTests.g.cs` / `EntityTests.g.cs` / `EntityStateTests.g.cs` partials sharing one fixture) assert the full status-code contract:
+
+- **Auth flow** — register → login → me returns 200; wrong password 401; duplicate email 409.
+- **Per-entity permission matrix** — each operation (`GetAll`/`GetById`/`Create`/`Delete`) expects `200/201/404` when public (`["*"]`) and `401` when restricted; authenticated role-based access returns `403` for a forbidden role.
+- **Model validation** — an invalid body to a public-create entity with a constrained field returns `400`.
+- **Authenticated CRUD** — POST → GET → PUT → DELETE → GET(404) with a Bearer token.
+- **Optimistic-lock concurrency** — two concurrent PUTs with the same `version` yield exactly `{200, 409}` (real transactions, not mocks).
 
 ## How roles reach the API
 
@@ -67,21 +82,19 @@ Add a field literally named `role` to the auth entity in `domain.yaml` (e.g. `ro
 
 ## Where your code goes
 
-Everything under `*.g.cs` (controllers, services, entities, DbContext, DTOs, Program.cs) is regenerated on every `generate` — **never edit it**.
+Everything under `*.g.cs` (controllers, services, entities, DbContext, DTOs, repositories, tests, `WebApi/Extensions/*.g.cs`) is regenerated on every `generate` — **never edit it**. The `.g.cs` suffix marks every regenerated file so the "don't touch" zone is obvious from the file hierarchy; the only non-`.g.cs` C# files are your scaffolded-once (`overwrite: false`) ones: `src/WebApi/Program.cs` (thin entry point calling the generated extension classes), `src/Application/Services/<Entity>Service.cs` and `src/Application/Services/AuthService.cs`.
 
 Your only owned zone is the custom partial:
 
-- `src/Application/Services/<Entity>Service.cs` — scaffolded once (`overwrite: false`). The generated `.g.cs` partial calls these hooks inside CRUD — implement them here:
-  - `partial void OnBeforeCreate(<Entity> entity)`
-  - `partial void OnBeforeUpdate(<Entity> entity)`
-  - `partial void OnBeforeDelete(<Entity> entity)`
-- Hooks run before `SaveChangesAsync`, so you can validate, enforce invariants, and mutate `entity` safely. Register the service via DI with `I<Entity>Service → <Entity>Service` (already wired).
+- `src/Application/Services/<Entity>Service.cs` — scaffolded once (`overwrite: false`). The generated `.g.cs` partial calls these hooks inside CRUD — override them here. All are `protected override` members with the `Async` suffix and a `CancellationToken ct` parameter:
+  - `Task<HookResult> OnBeforeCreateAsync(entity, ct)` / `OnBeforeUpdateAsync` / `OnBeforeDeleteAsync` — run before save; validate/mutate (compare against `OriginalState` in update); return `HookResult.Fail("reason")` to abort (→ HTTP 400, no exception needed)
+  - `Task<HookResult> OnCreateOverrideAsync(entity, ct)` / `OnUpdateOverrideAsync(id, entity, ct)` / `OnUpdatePartialOverrideAsync(id, entity, ct)` / `OnDeleteOverrideAsync(id, entity, ct)` — return `HookResult.Handled()` to skip the EF Core path entirely (e.g. write to a queue) while still running the matching `OnAfter*Async`; return `Fail("reason")` to abort
+  - `Task OnAfterCreateAsync(entity, ct)` / `OnAfterUpdateAsync` / `OnAfterDeleteAsync` — run after commit (`SaveChangesAsync` returned): entity has server-generated values (`Id`, computed `readonly` fields, timestamps). Use for side effects (email, integration events, notifications). Mutations are NOT re-saved.
+- `src/Application/Services/AuthService.cs` — scaffolded once for the auth entity. Generated `Generated/AuthService.g.cs` calls `OnBeforeRegisterAsync(<AuthEntity> entity, ct)` before persisting a new user — return `HookResult.Fail("reason")` to enforce registration rules (duplicate email, invite tokens, etc.) here.
+- Inside any hook, resolve registered services with `Services.GetRequiredService<T>()`. Before hooks run before `SaveChangesAsync`, so you can validate, enforce invariants, and mutate `entity` safely. Register the service via DI with `I<Entity>Service → <Entity>Service` (already wired).
 - For cross-entity or transactional logic (e.g. a wallet transfer touching two ledgers), inject the needed `I<Entity>Service`/repositories into your own Application services rather than reaching into generated code.
 
-## Working rules
-
-1. Never edit `*.g.cs` or other generated files — they are overwritten.
-2. Put business logic in custom partials (`Services/<Entity>Service.cs`) and their hooks.
-3. Model changes come from `domain.yaml` only — regenerate, don't hand-edit entities.
-4. Renames: declare `old_name` in `domain.yaml`; the bridge renames your custom partial too.
-5. Don't read generated code beyond what you need — the entity API and hook points above are enough to start.
+Remaining working rules:
+1. Model changes come from `domain.yaml` only — regenerate, don't hand-edit entities.
+2. Renames: declare `old_name` in `domain.yaml`; the bridge renames your custom partial too.
+3. Don't read generated code beyond what you need — the `*.g.cs` entity API and the hook points above are enough to start.
